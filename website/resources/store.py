@@ -1,42 +1,44 @@
 import uuid
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from flask import request
 from flask.views import MethodView
 from flask_smorest import Blueprint, abort
-from website.models import stores
-from .schema import StoreSchema
+from website.models import store
+from website.resources.schema import StoreSchema
+from website.db import db
+from website.models import StoreModel
 
 blp = Blueprint('stores', __name__, description='Operations on stores')
 
 @blp.route('/store/<string:store_id>')
 class Store(MethodView):
-    @blp.response(200, StoreSchema)
+    @blp.response(200, StoreSchema(many=True))
     def get(cls, store_id):
-        try:
-            return stores[store_id]
-        except KeyError:
-            abort(404, message='Store not found...')
+        return StoreModel.query.all()
 
     def delete(cls, store_id):
-        try:
-            del stores[store_id]
-        except KeyError:
-            abort(404, message='Store not found...')
+        store = StoreModel.query.get_or_404(store_id)
+        db.session.delete(store)
+        db.session.commi()
+        return {'message': 'The store is removed'}, 200
 
 @blp.route('/store')
 class StoreList(MethodView):
     @blp.response(200, StoreSchema(many=True))
     def get(cls):
-        return stores.values()
+        return store.values()
     
     @blp.arguments(StoreSchema)
-    @blp.response(200, StoreSchema)
+    @blp.response(201, StoreSchema)
     def post(self, store_data):
-        for store in stores.values():
-            if store['name'] == store_data['name']:
-                abort(400, message=f"Store {store_data['name']} already exists")
-        store_id = uuid.uuid4().hex
-        store = {**store_data, 'id': store_id}
-        stores[store_id] = store
+        store = StoreModel(**store_data)
+        try:
+            db.session.add(store_data)
+            db.session.commit()
+        except IntegrityError:
+            abort(http_status_code=400, message='A store with that name already exists, please take another one...')
+        except SQLAlchemyError:
+            abort(http_status_code=500, message='An error occured while creating the store...')
         return store
 
 
